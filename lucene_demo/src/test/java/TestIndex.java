@@ -9,6 +9,10 @@ import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.*;
+import org.apache.lucene.search.highlight.Formatter;
+import org.apache.lucene.search.highlight.Highlighter;
+import org.apache.lucene.search.highlight.QueryScorer;
+import org.apache.lucene.search.highlight.SimpleHTMLFormatter;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
@@ -22,6 +26,9 @@ import java.util.Collection;
 
 
 public class TestIndex {
+
+
+    public String indexPath = "d:\\indexDir";
 
     @Test
     public void testCreate() throws Exception {
@@ -318,5 +325,144 @@ public class TestIndex {
         writer.commit();
         // 关闭
         writer.close();
+    }
+
+    /**
+     *  删除索引
+     * 步骤：
+     * //1 创建文档对象目录
+     * //2 创建索引写入器配置对象
+     * //3 创建索引写入器
+     * //4 删除
+     * //5 提交
+     * //6 关闭
+     * 一般，为了进行精确删除，我们会根据唯一字段来删除。
+     * 比如ID 如果是用Term删除，要求ID也必须是字符串类型！
+     */
+    @Test
+    public void testDelete() throws Exception {
+        // 创建目录对象
+        Directory directory = FSDirectory.open(new File("indexDir"));
+        // 创建配置对象
+        IndexWriterConfig conf = new IndexWriterConfig(Version.LATEST, new IKAnalyzer());
+        // 创建索引写出工具
+        IndexWriter writer = new IndexWriter(directory, conf);
+        // 根据词条进行删除
+        // writer.deleteDocuments(new Term("id", "1"));
+        // 根据query对象删除,如果ID是数值类型，那么我们可以用数值范围查询锁定一个具体的ID
+        // Query query = NumericRangeQuery.newLongRange("id", 2L, 2L, true, true);
+        // writer.deleteDocuments(query);
+        // 删除所有
+        writer.deleteAll();
+        // 提交
+        writer.commit();
+        // 关闭
+        writer.close();
+    }
+
+
+    // 高亮显示
+    @Test
+    public void testHighlighter() throws Exception {
+        // 目录对象
+        Directory directory = FSDirectory.open(new File("d:\\indexDir"));
+        // 创建读取工具
+        IndexReader reader = DirectoryReader.open(directory);
+        // 创建搜索工具
+        IndexSearcher searcher = new IndexSearcher(reader);
+
+        QueryParser parser = new QueryParser("title", new IKAnalyzer());
+        Query query = parser.parse("谷歌地图");
+
+        // 格式化器
+        Formatter formatter = new SimpleHTMLFormatter("<em>", "</em>");
+        QueryScorer scorer = new QueryScorer(query);
+        // 准备高亮工具
+        Highlighter highlighter = new Highlighter(formatter, scorer);
+        // 搜索
+        TopDocs topDocs = searcher.search(query, 10);
+        System.out.println("本次搜索共" + topDocs.totalHits + "条数据");
+
+        ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+        for (ScoreDoc scoreDoc : scoreDocs) {
+            // 获取文档编号
+            int docID = scoreDoc.doc;
+            Document doc = reader.document(docID);
+            System.out.println("id: " + doc.get("id"));
+
+            String title = doc.get("title");
+            // 用高亮工具处理普通的查询结果,参数：分词器，要高亮的字段的名称，高亮字段的原始值
+            String hTitle = highlighter.getBestFragment(new IKAnalyzer(), "title", title);
+
+            System.out.println("title: " + hTitle);
+            // 获取文档的得分
+            System.out.println("得分：" + scoreDoc.score);
+        }
+
+    }
+
+    // 排序
+    @Test
+    public void testSortQuery() throws Exception {
+        // 目录对象
+        Directory directory = FSDirectory.open(new File(indexPath));
+        // 创建读取工具
+        IndexReader reader = DirectoryReader.open(directory);
+        // 创建搜索工具
+        IndexSearcher searcher = new IndexSearcher(reader);
+
+        QueryParser parser = new QueryParser("title", new IKAnalyzer());
+        Query query = parser.parse("谷歌地图");
+
+        // 创建排序对象,需要排序字段SortField，参数：字段的名称、字段的类型、是否反转如果是false，升序。true降序
+        Sort sort = new Sort(new SortField("id", SortField.Type.LONG, true));
+        // 搜索
+        TopDocs topDocs = searcher.search(query, 10,sort);
+        System.out.println("本次搜索共" + topDocs.totalHits + "条数据");
+
+        ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+        for (ScoreDoc scoreDoc : scoreDocs) {
+            // 获取文档编号
+            int docID = scoreDoc.doc;
+            Document doc = reader.document(docID);
+            System.out.println("id: " + doc.get("id"));
+            System.out.println("title: " + doc.get("title"));
+        }
+    }
+
+    // 分页
+    @Test
+    public void testPageQuery() throws Exception {
+        // 实际上Lucene本身不支持分页。因此我们需要自己进行逻辑分页。我们要准备分页参数：
+        int pageSize = 2;// 每页条数
+        int pageNum = 3;// 当前页码
+        int start = (pageNum - 1) * pageSize;// 当前页的起始条数
+        int end = start + pageSize;// 当前页的结束条数（不能包含）
+
+        // 目录对象
+        Directory directory = FSDirectory.open(new File(indexPath));
+        // 创建读取工具
+        IndexReader reader = DirectoryReader.open(directory);
+        // 创建搜索工具
+        IndexSearcher searcher = new IndexSearcher(reader);
+
+        QueryParser parser = new QueryParser("title", new IKAnalyzer());
+        Query query = parser.parse("谷歌地图");
+
+        // 创建排序对象,需要排序字段SortField，参数：字段的名称、字段的类型、是否反转如果是false，升序。true降序
+        Sort sort = new Sort(new SortField("id", SortField.Type.LONG, false));
+        // 搜索数据，查询0~end条
+        TopDocs topDocs = searcher.search(query, end,sort);
+        System.out.println("本次搜索共" + topDocs.totalHits + "条数据");
+
+        ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+        for (int i = start; i < end; i--) {
+            ScoreDoc scoreDoc = scoreDocs[i];
+            // 获取文档编号
+            int docID = scoreDoc.doc;
+            Document doc = reader.document(docID);
+            System.out.println("id: " + doc.get("id"));
+            System.out.println("title: " + doc.get("title"));
+        }
     }
 }
